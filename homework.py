@@ -1,11 +1,10 @@
+import logging
 import os
-from time import time
+import time
+
 import requests
 import telegram
-from telegram import Bot
-from telegram.ext import Updater
 from dotenv import load_dotenv
-
 
 load_dotenv()
 
@@ -31,24 +30,34 @@ def check_tokens():
     token_list = [PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]
     for token in token_list:
         if token is None:
+            logging.critical('Не все токены заполнены!')
             raise Exception('Не все токены заполнены!')
 
 
 def send_message(bot, message):
     """Отправка сообщения в Telegram."""
-    bot.send_message(TELEGRAM_CHAT_ID, message)
+    try:
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+        logging.debug('Сообщение отправлено.')
+    except telegram.TelegramError as error:
+        logging.error('Сообщение не отправлено.')
+        raise Exception(error)
 
 
 def get_api_answer(timestamp):
     """Запрос к эндпоинту Яндекс.Практикум, получение данных."""
-    responce = requests.get(
-        ENDPOINT,
-        headers=HEADERS,
-        params={'from_date': timestamp}
-    )
-    if responce.status_code != 200:
-        raise Exception('В запросе переданы некорректные данные (токен/дата)')
-    return responce.json()
+    try:
+        responce = requests.get(
+            ENDPOINT,
+            headers=HEADERS,
+            params={'from_date': timestamp}
+        )
+
+        if responce.status_code != 200:
+            raise Exception('В запросе переданы некорректные данные')
+        return responce.json()
+    except requests.RequestException() as error:
+        logging.error(f'Ошибка запроса к API {error}')
 
 
 def check_response(response):
@@ -56,6 +65,7 @@ def check_response(response):
     if not isinstance(response, dict):
         raise TypeError('В ответе ожидается словарь')
     if 'homeworks' not in response:
+        logging.error('Ключ homeworks в словаре не найден.')
         raise KeyError('Ключ homeworks в словаре не найден.')
     if not isinstance(response['homeworks'], list):
         raise TypeError('В полученном словаре нет списка работ')
@@ -68,8 +78,12 @@ def parse_status(homework):
         raise KeyError('Ключ homework_name в словаре не найден.')
     homework_name = homework['homework_name']
     status = homework['status']
-    verdict = HOMEWORK_VERDICTS[status]
-    return f'Изменился статус проверки работы "{homework_name}". {verdict}'
+    if status not in HOMEWORK_VERDICTS:
+        logging.error('Неожиданный статус')
+        raise KeyError('Неожиданный статус')
+    else:
+        verdict = HOMEWORK_VERDICTS[status]
+        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def main():
@@ -77,20 +91,43 @@ def main():
     check_tokens()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-
-
-    ...
-
+    last_status = ''
     while True:
         try:
+            response = get_api_answer(timestamp)
+            check_response(response)
+            homeworks = response['homeworks']
+            if homeworks:
+                last_homework = homeworks[0]
+                if last_status != last_homework['status']:
+                    message = parse_status(last_homework)
+                    send_message(bot, message)
+                    last_status = last_homework['status']
+                else:
+                    logging.debug('Новые статусы отсутствуют.')
 
-            ...
-
+            timestamp = homeworks['current_date']
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            ...
-        ...
 
+        time.sleep(RETRY_PERIOD)
+
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    filename='main.log',
+    filemode='w',
+    format='%(asctime)s, %(levelname)s, %(message)s'
+)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+logger.addHandler(handler)
+formatter = logging.Formatter(
+    '%(asctime)s - %(levelname)s - %(message)s'
+)
+handler.setFormatter(formatter)
 
 if __name__ == '__main__':
     main()
