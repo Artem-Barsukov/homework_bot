@@ -72,10 +72,10 @@ def check_response(response):
 
 def parse_status(homework):
     """Получение значения статуса работы."""
-    if 'homework_name' not in homework:
+    if (homework_name := homework.get('homework_name')) is None:
         raise KeyError('Ключ homework_name в словаре не найден.')
-    homework_name = homework['homework_name']
-    status = homework['status']
+    if (status := homework.get('status')) is None:
+        raise KeyError('Ключ status в словаре не найден.')
     if status not in HOMEWORK_VERDICTS:
         raise KeyError('Неожиданный статус')
     verdict = HOMEWORK_VERDICTS[status]
@@ -104,10 +104,6 @@ def main():
             last_status = last_homework['status']
             timestamp = response['current_date']
 
-        except requests.RequestException() as error:
-            logging.error(f'Ошибка запроса к API {error}')
-        except KeyError as error:
-            logging.error(error)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logging.error(error)
